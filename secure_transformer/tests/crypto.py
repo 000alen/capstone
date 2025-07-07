@@ -1,7 +1,8 @@
 import torch
+import pytest
 
-from .model import ClientFront, ServerCore, ClientBack
-from .utils import l2_normalize
+from secure_transformer.model import ClientFront, ServerCore, ClientBack
+from secure_transformer.utils import l2_normalize
 
 
 def ind_cpa_trial(front: ClientFront, server: ServerCore, back: ClientBack) -> int:
@@ -29,10 +30,15 @@ def ind_cpa_trial(front: ClientFront, server: ServerCore, back: ClientBack) -> i
     return int(guess == choice)
 
 
-def empirical_ind_cpa(front: ClientFront, server: ServerCore, back: ClientBack, trials=1000):
-    correct = 0
-    for _ in range(trials):
-        correct += ind_cpa_trial(front, server, back)
-    adv = abs(correct / trials - 0.5)
-    print(f"Adversary advantage ≈ {adv:.3f} (should ≈ 0)")
+@pytest.mark.parametrize("trials", [3000])
+def test_ind_cpa_advantage(trials):
+    d, m, k = 32, 64, 4
+    front = ClientFront(50, d, m, k)
+    server = ServerCore(d + m, k, layers=1)
+    back = ClientBack(50, d, m, k)
 
+    wins = 0
+    for _ in range(trials):
+        wins += ind_cpa_trial(front, server, back)
+    adv = abs(wins / trials - 0.5)
+    assert adv < 0.05  # empirical bound

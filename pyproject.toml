@@ -1,5 +1,5 @@
 [project]
-name = "capstone"
+name = "secure_transformer"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -8,7 +8,16 @@ dependencies = [
     "ipykernel>=6.29.5",
     "matplotlib>=3.10.3",
     "numpy>=2.3.0",
+    "pytest>=8.4.1",
     "scipy>=1.15.3",
     "tenseal>=0.3.16",
     "torch>=2.7.1",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["secure-transformer/tests"]
+pythonpath = ["."]
+python_files = ["*.py"]
+python_functions = ["test_*"]
+python_classes = ["Test*"]
+addopts = "-v --tb=short"

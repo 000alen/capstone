@@ -2,7 +2,6 @@ import torch
 
 from .model import ClientFront, ServerCore, ClientBack
 from .utils import l2_normalize
-from .tests import empirical_ind_cpa
 
 
 if __name__ == "__main__":
@@ -26,6 +25,3 @@ if __name__ == "__main__":
     plain = torch.cat([l2_normalize(front.embed[tokens]), zeros], dim=-1)
     logits_plain = back(server(plain), torch.eye(d + m))
     print("max |secure-plain| logits diff:", (logits_secure - logits_plain).abs().max().item())
-
-    # empirical IND‑CPA game
-    empirical_ind_cpa(front, server, back, trials=500)
