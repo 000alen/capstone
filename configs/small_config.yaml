@@ -1,0 +1,44 @@
+# Small configuration for quick experimentation and testing
+
+# Model Architecture (smaller for faster training)
+model:
+  d_signal: 64           # Reduced signal dimension
+  m_noise: 32           # Reduced noise dimension  
+  k_vec: 8              # Reduced vector dimension
+  layers: 3             # Fewer layers
+  heads: 4              # Fewer attention heads
+  rank: 4               # Smaller Lie algebra rank
+  sigma: 1.0            # Noise scale
+
+# Training Hyperparameters (faster iteration)
+training:
+  batch_size: 16        # Smaller batch size
+  sequence_length: 256  # Shorter sequences
+  learning_rate: 5e-4   # Slightly higher LR for faster convergence
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip_norm: 1.0
+  max_epochs: 20        # Fewer epochs for testing
+  warmup_steps: 500     # Shorter warmup
+  eval_interval: 100    # More frequent evaluation
+  save_interval: 200    # More frequent saves
+
+# Data Configuration
+data:
+  dataset_name: "wikitext"
+  dataset_config: "wikitext-103-raw-v1"
+  tokenizer_name: "gpt2"
+  num_workers: 2        # Fewer workers
+  pin_memory: true
+
+# Experiment Tracking
+experiment:
+  project_name: "secure-transformer-small"
+  experiment_name: null
+  checkpoint_dir: "./checkpoints_small"
+  log_level: "INFO"
+
+# Hardware
+hardware:
+  device: "auto" 

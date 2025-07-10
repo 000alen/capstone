@@ -1,0 +1,44 @@
+# Large configuration for production-scale training
+
+# Model Architecture (large model for best performance)
+model:
+  d_signal: 256          # Larger signal dimension
+  m_noise: 128          # Larger noise dimension
+  k_vec: 32             # Larger vector dimension
+  layers: 12            # More layers
+  heads: 16             # More attention heads
+  rank: 16              # Larger Lie algebra rank
+  sigma: 1.0            # Noise scale
+
+# Training Hyperparameters (production settings)
+training:
+  batch_size: 64        # Larger batch size
+  sequence_length: 1024 # Longer sequences
+  learning_rate: 1e-4   # Conservative learning rate
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip_norm: 1.0
+  max_epochs: 100       # Many epochs for full training
+  warmup_steps: 5000    # Longer warmup
+  eval_interval: 1000   # Less frequent evaluation
+  save_interval: 2000   # Less frequent saves
+
+# Data Configuration
+data:
+  dataset_name: "wikitext"
+  dataset_config: "wikitext-103-raw-v1"
+  tokenizer_name: "gpt2"
+  num_workers: 8        # More workers for large batches
+  pin_memory: true
+
+# Experiment Tracking
+experiment:
+  project_name: "secure-transformer-large"
+  experiment_name: null
+  checkpoint_dir: "./checkpoints_large"
+  log_level: "INFO"
+
+# Hardware
+hardware:
+  device: "auto" 

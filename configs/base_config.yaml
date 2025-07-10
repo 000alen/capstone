@@ -1,0 +1,44 @@
+# Base configuration for secure transformer training
+
+# Model Architecture
+model:
+  d_signal: 128          # Signal dimension (real coordinates)
+  m_noise: 64           # Noise dimension (added for security)
+  k_vec: 16             # Vector dimension per token
+  layers: 6             # Number of transformer layers
+  heads: 8              # Number of attention heads
+  rank: 8               # Lie algebra rank for residual connections
+  sigma: 1.0            # Noise scale
+
+# Training Hyperparameters
+training:
+  batch_size: 32
+  sequence_length: 512
+  learning_rate: 3e-4
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip_norm: 1.0
+  max_epochs: 50
+  warmup_steps: 2000
+  eval_interval: 500
+  save_interval: 1000
+
+# Data Configuration
+data:
+  dataset_name: "wikitext"
+  dataset_config: "wikitext-103-raw-v1"
+  tokenizer_name: "gpt2"
+  num_workers: 4
+  pin_memory: true
+
+# Experiment Tracking
+experiment:
+  project_name: "secure-transformer"
+  experiment_name: null  # Will be auto-generated if null
+  checkpoint_dir: "./checkpoints"
+  log_level: "INFO"
+
+# Hardware
+hardware:
+  device: "auto"  # "auto", "cuda", "cpu" 
