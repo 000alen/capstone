@@ -68,6 +68,7 @@ class TrainingConfig:
     dataset_name: str = "wikitext"
     dataset_config: str = "wikitext-103-raw-v1"
     tokenizer_name: str = "gpt2"
+    max_dataset_tokens: Optional[int] = None  # Limit dataset size for testing (None = full dataset)
 
     # Logging and checkpointing
     project_name: str = "secure-transformer"
@@ -82,41 +83,112 @@ class TrainingConfig:
 
 
 class WikiTextDataset(Dataset):
-    """WikiText-103 dataset with tokenization and chunking"""
+    """Memory-efficient WikiText-103 dataset with streaming and chunking"""
 
-    def __init__(self, split: str, tokenizer, sequence_length: int):
+    def __init__(self, split: str, tokenizer, sequence_length: int, max_length: Optional[int] = None):
         self.tokenizer = tokenizer
         self.sequence_length = sequence_length
+        self.max_length = max_length  # Optional limit for testing
+        
+        # Load dataset in streaming mode to avoid loading all into memory
+        self.dataset = load_dataset("wikitext", "wikitext-103-raw-v1", split=split, streaming=True)
+        
+        # For reproducibility, we need to pre-process to get a consistent length
+        # We'll cache the first pass to count sequences
+        self._initialize_dataset()
 
-        # Load dataset
-        dataset = load_dataset("wikitext", "wikitext-103-raw-v1", split=split)
-
-        # Concatenate all text
-        text = "\n".join(dataset["text"])
-
-        # Tokenize
-        tokens = tokenizer.encode(text)
-        self.tokens = torch.tensor(tokens, dtype=torch.long)
-
-        # Calculate number of sequences
-        self.num_sequences = len(self.tokens) // sequence_length
-
+    def _initialize_dataset(self):
+        """Initialize dataset by processing it once to get sequence count and cache article boundaries"""
+        self.article_boundaries = []  # (start_idx, end_idx) for each article
+        self.total_tokens = 0
+        
+        # Process dataset to find article boundaries and total length
+        current_tokens = []
+        
+        for i, example in enumerate(self.dataset):
+            text = example["text"].strip()
+            if not text:  # Skip empty lines
+                continue
+                
+            # Tokenize this article
+            tokens = self.tokenizer.encode(text, add_special_tokens=False)
+            
+            if tokens:  # Only add non-empty articles
+                start_idx = self.total_tokens
+                end_idx = self.total_tokens + len(tokens)
+                self.article_boundaries.append((start_idx, end_idx, text))
+                self.total_tokens += len(tokens)
+                
+                # Optional: limit dataset size for testing
+                if self.max_length and self.total_tokens >= self.max_length:
+                    break
+        
+        # Calculate number of complete sequences we can form
+        self.num_sequences = max(0, (self.total_tokens - 1) // self.sequence_length)
+        
         logging.info(
-            f"Loaded {split} split: {len(self.tokens)} tokens, {self.num_sequences} sequences"
+            f"Initialized dataset: {len(self.article_boundaries)} articles, "
+            f"{self.total_tokens} tokens, {self.num_sequences} sequences"
         )
 
     def __len__(self):
         return self.num_sequences
 
     def __getitem__(self, idx):
-        start = idx * self.sequence_length
-        end = start + self.sequence_length
-
-        # Input and target (shifted by 1)
-        input_ids = self.tokens[start:end]
-        target_ids = self.tokens[start + 1 : end + 1]
-
+        if idx >= self.num_sequences:
+            raise IndexError(f"Index {idx} out of range for dataset of size {self.num_sequences}")
+            
+        # Calculate the absolute token positions we need
+        start_pos = idx * self.sequence_length
+        end_pos = start_pos + self.sequence_length + 1  # +1 for target
+        
+        # Find which articles contain these positions and extract tokens
+        tokens = self._get_tokens_for_range(start_pos, end_pos)
+        
+        # Ensure we have enough tokens
+        if len(tokens) < self.sequence_length + 1:
+            # Pad with eos token if necessary
+            pad_length = (self.sequence_length + 1) - len(tokens)
+            tokens.extend([self.tokenizer.eos_token_id] * pad_length)
+        
+        # Convert to tensor and create input/target pair
+        tokens = torch.tensor(tokens[:self.sequence_length + 1], dtype=torch.long)
+        input_ids = tokens[:-1]  # First sequence_length tokens
+        target_ids = tokens[1:]  # Shifted by 1 for next token prediction
+        
         return input_ids, target_ids
+
+    def _get_tokens_for_range(self, start_pos: int, end_pos: int) -> list:
+        """Extract tokens for a given range across potentially multiple articles"""
+        tokens = []
+        current_pos = 0
+        
+        for article_start, article_end, text in self.article_boundaries:
+            # Check if this article overlaps with our desired range
+            if article_end <= start_pos:
+                # Article is completely before our range
+                current_pos = article_end
+                continue
+            elif article_start >= end_pos:
+                # Article is completely after our range
+                break
+            
+            # This article overlaps with our range
+            article_tokens = self.tokenizer.encode(text, add_special_tokens=False)
+            
+            # Calculate which part of this article we need
+            article_relative_start = max(0, start_pos - article_start)
+            article_relative_end = min(len(article_tokens), end_pos - article_start)
+            
+            if article_relative_end > article_relative_start:
+                needed_tokens = article_tokens[article_relative_start:article_relative_end]
+                tokens.extend(needed_tokens)
+                
+                # If we have enough tokens, we can stop
+                if len(tokens) >= (end_pos - start_pos):
+                    break
+        
+        return tokens
 
 
 class SecureTransformer(nn.Module):
@@ -251,9 +323,11 @@ class Trainer:
         self.config.vocab_size = len(tokenizer)
 
         # Create datasets
-        train_dataset = WikiTextDataset("train", tokenizer, self.config.sequence_length)
+        train_dataset = WikiTextDataset(
+            "train", tokenizer, self.config.sequence_length, self.config.max_dataset_tokens
+        )
         val_dataset = WikiTextDataset(
-            "validation", tokenizer, self.config.sequence_length
+            "validation", tokenizer, self.config.sequence_length, self.config.max_dataset_tokens
         )
 
         # Create data loaders
@@ -473,6 +547,13 @@ def main():
     )
     parser.add_argument("--max_epochs", type=int, default=50, help="Maximum epochs")
     parser.add_argument("--warmup_steps", type=int, default=2000, help="Warmup steps")
+
+    # Data parameters
+    parser.add_argument(
+        "--max_dataset_tokens", 
+        type=int, 
+        help="Limit dataset size for testing (default: full dataset)"
+    )
 
     # Experiment parameters
     parser.add_argument("--experiment_name", type=str, help="Experiment name")

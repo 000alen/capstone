@@ -29,6 +29,7 @@ data:
   dataset_name: "wikitext"
   dataset_config: "wikitext-103-raw-v1"
   tokenizer_name: "gpt2"
+  max_dataset_tokens: 1000000  # Limit to 1M tokens for testing (small subset)
   num_workers: 2        # Fewer workers
   pin_memory: true
 
