@@ -14,7 +14,7 @@ model:
 training:
   batch_size: 64        # Larger batch size
   sequence_length: 1024 # Longer sequences
-  learning_rate: 1e-4   # Conservative learning rate
+  learning_rate: 0.0001   # Conservative learning rate
   weight_decay: 0.1
   beta1: 0.9
   beta2: 0.95

@@ -14,7 +14,7 @@ model:
 training:
   batch_size: 16        # Smaller batch size
   sequence_length: 256  # Shorter sequences
-  learning_rate: 5e-4   # Slightly higher LR for faster convergence
+  learning_rate: 0.0005   # Slightly higher LR for faster convergence
   weight_decay: 0.1
   beta1: 0.9
   beta2: 0.95
