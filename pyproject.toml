@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["secure-transformer/tests"]
+testpaths = ["secure_transformer/tests"]
 pythonpath = ["."]
 python_files = ["*.py"]
 python_functions = ["test_*"]

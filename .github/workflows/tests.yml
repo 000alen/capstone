@@ -1,0 +1,77 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.13"]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+    
+    - name: Set up Python environment
+      run: uv python pin ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: uv sync
+    
+    - name: Run type checking (mypy)
+      run: uv run mypy secure_transformer/
+      continue-on-error: true
+    
+    - name: Run all tests
+      run: uv run pytest
+    
+    - name: Run equivariance tests (critical for security)
+      run: uv run pytest secure_transformer/tests/equivariance.py -v
+    
+    - name: Run crypto tests (critical for security)  
+      run: uv run pytest secure_transformer/tests/crypto.py -v
+
+  test-imports:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.13"
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+    
+    - name: Install minimal dependencies
+      run: uv sync --no-dev
+    
+    - name: Test basic imports
+      run: |
+        uv run python -c "from secure_transformer.model import ClientFront, ServerCore, ClientBack; print('Model imports successful')"
+        uv run python -c "from secure_transformer.utils import random_orthogonal, l2_normalize; print('Utils imports successful')"
+        uv run python -c "from secure_transformer.train import SecureTransformer, TrainingConfig; print('Training imports successful')"
+        uv run python -c "from secure_transformer.evaluate import Evaluator; print('Evaluation imports successful')" 
