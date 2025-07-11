@@ -12,7 +12,7 @@ model:
 
 # Training Hyperparameters (faster iteration)
 training:
-  batch_size: 16 # Smaller batch size
+  batch_size: 64 # Smaller batch size
   sequence_length: 256 # Shorter sequences
   learning_rate: 0.0005 # Slightly higher LR for faster convergence
   weight_decay: 0.1
