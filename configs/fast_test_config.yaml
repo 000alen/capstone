@@ -1,0 +1,41 @@
+# Fast test configuration for verifying startup speed
+# Uses limited dataset size for quick testing
+
+model:
+  d_signal: 64
+  m_noise: 32
+  k_vec: 8
+  layers: 2
+  heads: 4
+  rank: 4
+  sigma: 1.0
+
+training:
+  batch_size: 8
+  sequence_length: 256
+  learning_rate: 3e-4
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+  grad_clip_norm: 1.0
+  max_epochs: 2
+  warmup_steps: 100
+  eval_interval: 50
+  save_interval: 200
+
+data:
+  dataset_name: "wikitext"
+  dataset_config: "wikitext-103-raw-v1"
+  tokenizer_name: "gpt2"
+  num_workers: 2
+  pin_memory: true
+  max_dataset_tokens: 1000000  # Limit to 1M tokens for fast testing
+
+experiment:
+  project_name: "secure-transformer"
+  experiment_name: "fast-startup-test"
+  checkpoint_dir: "./checkpoints"
+  log_level: "INFO"
+
+hardware:
+  device: "auto" 

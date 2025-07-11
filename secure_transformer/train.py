@@ -33,7 +33,7 @@ from .model import SecureTransformer
 
 
 class WikiTextDataset(Dataset):
-    """Memory-efficient WikiText-103 dataset with streaming and chunking"""
+    """Memory-efficient WikiText-103 dataset with lazy loading"""
 
     def __init__(
         self,
@@ -42,6 +42,7 @@ class WikiTextDataset(Dataset):
         sequence_length: int,
         max_length: Optional[int] = None,
     ):
+        self.split = split
         self.tokenizer = tokenizer
         self.sequence_length = sequence_length
         self.max_length = max_length  # Optional limit for testing
@@ -51,56 +52,55 @@ class WikiTextDataset(Dataset):
             "wikitext", "wikitext-103-raw-v1", split=split, streaming=True
         )
 
-        # For reproducibility, we need to pre-process to get a consistent length
-        # We'll cache the first pass to count sequences
-        self._initialize_dataset()
+        # Quick initialization without processing entire dataset
+        self._initialize_lazy()
 
-    def _initialize_dataset(self):
-        """Initialize dataset by processing it once to get sequence count and cache article boundaries"""
-        self.article_boundaries = []  # (start_idx, end_idx) for each article
-        self.total_tokens = 0
-
-        for i, example in enumerate(self.dataset):
-            text = example["text"].strip()
-            if not text:  # Skip empty lines
-                continue
-
-            # Tokenize this article
-            tokens = self.tokenizer.encode(text, add_special_tokens=False)
-
-            if tokens:  # Only add non-empty articles
-                start_idx = self.total_tokens
-                end_idx = self.total_tokens + len(tokens)
-                self.article_boundaries.append((start_idx, end_idx, text))
-                self.total_tokens += len(tokens)
-
-                # Optional: limit dataset size for testing
-                if self.max_length and self.total_tokens >= self.max_length:
-                    break
-
-        # Calculate number of complete sequences we can form
-        self.num_sequences = max(0, (self.total_tokens - 1) // self.sequence_length)
-
+    def _initialize_lazy(self):
+        """Fast initialization with lazy loading - estimate size without full processing"""
+        logging.info(f"Initializing {self.__class__.__name__} with lazy loading...")
+        
+        # For WikiText-103, we know approximate sizes to avoid full scan
+        # These are rough estimates to get started quickly
+        if self.max_length:
+            estimated_tokens = min(self.max_length, 100_000_000)  # Cap at 100M tokens
+        else:
+            # Rough estimates for WikiText-103 splits
+            estimates = {
+                "train": 100_000_000,      # ~100M tokens
+                "validation": 200_000,     # ~200K tokens  
+                "test": 240_000           # ~240K tokens
+            }
+            estimated_tokens = estimates.get(self.split, estimates["train"])
+        
+        # Estimate number of sequences
+        self.estimated_num_sequences = max(1, (estimated_tokens - 1) // self.sequence_length)
+        
+        # Cache for processed articles to avoid re-tokenization
+        self._article_cache = {}
+        self._cache_hits = 0
+        self._cache_misses = 0
+        
         logging.info(
-            f"Initialized dataset: {len(self.article_boundaries)} articles, "
-            f"{self.total_tokens} tokens, {self.num_sequences} sequences"
+            f"Lazy initialization complete for '{self.split}' split: "
+            f"estimated ~{estimated_tokens:,} tokens, "
+            f"~{self.estimated_num_sequences:,} sequences"
         )
 
     def __len__(self):
-        return self.num_sequences
+        return self.estimated_num_sequences
 
     def __getitem__(self, idx):
-        if idx >= self.num_sequences:
+        if idx >= self.estimated_num_sequences:
             raise IndexError(
-                f"Index {idx} out of range for dataset of size {self.num_sequences}"
+                f"Index {idx} out of range for dataset of size {self.estimated_num_sequences}"
             )
 
-        # Calculate the absolute token positions we need
-        start_pos = idx * self.sequence_length
-        end_pos = start_pos + self.sequence_length + 1  # +1 for target
-
-        # Find which articles contain these positions and extract tokens
-        tokens = self._get_tokens_for_range(start_pos, end_pos)
+        # Calculate which articles and positions we need for this sequence
+        target_start_pos = idx * self.sequence_length
+        target_end_pos = target_start_pos + self.sequence_length + 1  # +1 for target
+        
+        # Get tokens for this range with lazy loading
+        tokens = self._get_tokens_lazy(target_start_pos, target_end_pos)
 
         # Ensure we have enough tokens
         if len(tokens) < self.sequence_length + 1:
@@ -115,39 +115,80 @@ class WikiTextDataset(Dataset):
 
         return input_ids, target_ids
 
-    def _get_tokens_for_range(self, start_pos: int, end_pos: int) -> list:
-        """Extract tokens for a given range across potentially multiple articles"""
+    def _get_tokens_lazy(self, start_pos: int, end_pos: int) -> list:
+        """Efficiently get tokens for range with caching and lazy processing"""
         tokens = []
         current_pos = 0
-
-        for article_start, article_end, text in self.article_boundaries:
+        articles_processed = 0
+        
+        # Iterator through dataset
+        for article_idx, example in enumerate(self.dataset):
+            text = example["text"].strip()
+            if not text:  # Skip empty lines
+                continue
+                
+            # Check cache first
+            if article_idx in self._article_cache:
+                article_tokens = self._article_cache[article_idx]
+                self._cache_hits += 1
+            else:
+                # Tokenize and cache
+                article_tokens = self.tokenizer.encode(text, add_special_tokens=False)
+                # Only cache if article is reasonably sized (avoid memory bloat)
+                if len(article_tokens) < 10000:  # Cache articles < 10K tokens
+                    self._article_cache[article_idx] = article_tokens
+                self._cache_misses += 1
+            
+            if not article_tokens:
+                continue
+                
+            article_start = current_pos
+            article_end = current_pos + len(article_tokens)
+            
             # Check if this article overlaps with our desired range
             if article_end <= start_pos:
                 # Article is completely before our range
                 current_pos = article_end
                 continue
             elif article_start >= end_pos:
-                # Article is completely after our range
+                # Article is completely after our range - we can stop
                 break
-
+                
             # This article overlaps with our range
-            article_tokens = self.tokenizer.encode(text, add_special_tokens=False)
-
-            # Calculate which part of this article we need
             article_relative_start = max(0, start_pos - article_start)
             article_relative_end = min(len(article_tokens), end_pos - article_start)
 
             if article_relative_end > article_relative_start:
-                needed_tokens = article_tokens[
-                    article_relative_start:article_relative_end
-                ]
+                needed_tokens = article_tokens[article_relative_start:article_relative_end]
                 tokens.extend(needed_tokens)
 
                 # If we have enough tokens, we can stop
                 if len(tokens) >= (end_pos - start_pos):
                     break
+                    
+            current_pos = article_end
+            articles_processed += 1
+            
+            # Optional: limit processing for testing
+            if self.max_length and current_pos >= self.max_length:
+                break
+                
+            # Early stopping if we've found enough tokens
+            if len(tokens) >= (end_pos - start_pos):
+                break
 
         return tokens
+    
+    def get_cache_stats(self):
+        """Get caching statistics for debugging"""
+        total_requests = self._cache_hits + self._cache_misses
+        hit_rate = self._cache_hits / max(total_requests, 1) * 100
+        return {
+            "cache_hits": self._cache_hits,
+            "cache_misses": self._cache_misses, 
+            "hit_rate": f"{hit_rate:.1f}%",
+            "cached_articles": len(self._article_cache)
+        }
 
 
 class Trainer:
@@ -160,17 +201,22 @@ class Trainer:
         # Setup logging
         logging.basicConfig(level=getattr(logging, config.log_level))
         self.logger = logging.getLogger(__name__)
+        
+        self.logger.info("🚀 Initializing Secure Transformer Training...")
 
         # Create checkpoint directory
+        self.logger.info("📁 Setting up checkpoint directory...")
         Path(config.checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
         # Initialize model
+        self.logger.info("🧠 Initializing model...")
         self.model = SecureTransformer(config).to(self.device)
         self.logger.info(
-            f"Model has {sum(p.numel() for p in self.model.parameters()):,} parameters"
+            f"✅ Model initialized with {sum(p.numel() for p in self.model.parameters()):,} parameters"
         )
 
         # Initialize optimizer
+        self.logger.info("⚡ Setting up optimizer...")
         self.optimizer = AdamW(
             self.model.parameters(),
             lr=config.learning_rate,
@@ -195,9 +241,11 @@ class Trainer:
         self.total_steps = len(self.train_loader) * self.config.max_epochs
 
         # Initialize scheduler
+        self.logger.info("📈 Setting up learning rate scheduler...")
         self.scheduler = self._create_scheduler()
 
         # Initialize wandb
+        self.logger.info("📊 Initializing Weights & Biases...")
         if config.experiment_name is None:
             config.experiment_name = f"secure-transformer-{int(time.time())}"
 
@@ -209,6 +257,11 @@ class Trainer:
 
         # Log model architecture
         wandb.watch(self.model, log_freq=100)
+        
+        self.logger.info("✅ Initialization complete! Ready to train.")
+        self.logger.info(f"🎯 Experiment: {config.experiment_name}")
+        self.logger.info(f"🔧 Device: {self.device}")
+        self.logger.info(f"📏 Total training steps: {self.total_steps:,}")
 
     def _create_scheduler(self):
         """Create learning rate scheduler with warmup and cosine annealing"""
@@ -238,21 +291,28 @@ class Trainer:
 
     def _load_data(self) -> Tuple[DataLoader, DataLoader]:
         """Load and prepare WikiText-103 dataset"""
+        self.logger.info("🔄 Loading data and initializing datasets...")
+        
         # Initialize tokenizer
+        self.logger.info("📝 Loading tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained(self.config.tokenizer_name)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
         # Update vocab size to match tokenizer
         self.config.vocab_size = len(tokenizer)
+        self.logger.info(f"✅ Tokenizer loaded: vocab_size={self.config.vocab_size}")
 
-        # Create datasets
+        # Create datasets with progress logging
+        self.logger.info("📚 Creating training dataset...")
         train_dataset = WikiTextDataset(
             "train",
             tokenizer,
             self.config.sequence_length,
             self.config.max_dataset_tokens,
         )
+        
+        self.logger.info("📖 Creating validation dataset...")
         val_dataset = WikiTextDataset(
             "validation",
             tokenizer,
@@ -261,6 +321,7 @@ class Trainer:
         )
 
         # Create data loaders
+        self.logger.info("⚙️  Creating data loaders...")
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.config.batch_size,
@@ -276,6 +337,12 @@ class Trainer:
             num_workers=self.config.num_workers,
             pin_memory=self.config.pin_memory,
         )
+        
+        self.logger.info(f"✅ Data loading complete:")
+        self.logger.info(f"   📊 Training batches: {len(train_loader):,}")
+        self.logger.info(f"   📊 Validation batches: {len(val_loader):,}")
+        self.logger.info(f"   📊 Batch size: {self.config.batch_size}")
+        self.logger.info(f"   📊 Sequence length: {self.config.sequence_length}")
 
         return train_loader, val_loader
 
@@ -492,6 +559,14 @@ class Trainer:
                     # Save checkpoint
                     if self.step % self.config.save_interval == 0:
                         self.save_checkpoint(is_best)
+                        
+                # Log cache statistics periodically (every 1000 steps)
+                if self.step % 1000 == 0 and self.step > 0:
+                    try:
+                        train_cache_stats = self.train_loader.dataset.get_cache_stats()
+                        self.logger.info(f"📊 Dataset cache stats: {train_cache_stats}")
+                    except Exception:
+                        pass  # Ignore if cache stats not available
 
             # End of epoch
             epoch_time = time.time() - epoch_start_time
@@ -511,6 +586,14 @@ class Trainer:
         self.logger.info("Training completed!")
         final_time = self._get_time_estimates()
         self.logger.info(f"Total training time: {final_time['elapsed']}")
+        
+        # Final cache statistics
+        try:
+            train_cache_stats = self.train_loader.dataset.get_cache_stats()
+            self.logger.info(f"📊 Final dataset cache stats: {train_cache_stats}")
+        except Exception:
+            pass
+            
         wandb.finish()
 
     def _format_time(self, seconds: float) -> str:

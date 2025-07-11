@@ -71,6 +71,7 @@ def create_training_config(config_dict: dict) -> TrainingConfig:
         'data_tokenizer_name': 'tokenizer_name',
         'data_num_workers': 'num_workers',
         'data_pin_memory': 'pin_memory',
+        'data_max_dataset_tokens': 'max_dataset_tokens',
         
         # Experiment parameters
         'experiment_project_name': 'project_name',
