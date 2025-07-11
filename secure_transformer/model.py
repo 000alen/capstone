@@ -22,12 +22,10 @@ from .utils import random_orthogonal, l2_normalize
 class IGatedNonlinear(nn.Module):
     def __init__(self, hidden: int = 16):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(1, hidden), nn.ReLU(), nn.Linear(hidden, 1)
-        )
+        self.net = nn.Sequential(nn.Linear(1, hidden), nn.ReLU(), nn.Linear(hidden, 1))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        norms2 = (x ** 2).sum(dim=-1, keepdim=True)
+        norms2 = (x**2).sum(dim=-1, keepdim=True)
         gates = torch.sigmoid(self.net(norms2))
         return x * gates
 
@@ -88,22 +86,28 @@ class EBlock(nn.Module):
 class ClientFront(nn.Module):
     """Embeds tokens, L2-normalizes, pads with Gaussian noise, rotates."""
 
-    def __init__(self, vocab: int, d_signal: int, m_noise: int, k_vec: int, sigma: float = 1.0):
+    def __init__(
+        self, vocab: int, d_signal: int, m_noise: int, k_vec: int, sigma: float = 1.0
+    ):
         super().__init__()
         self.d = d_signal
         self.m = m_noise
         self.N = d_signal + m_noise
         self.k = k_vec
         self.sigma = sigma
-        self.embed = nn.Parameter(torch.randn(vocab, k_vec, d_signal) / math.sqrt(d_signal * k_vec))
+        self.embed = nn.Parameter(
+            torch.randn(vocab, k_vec, d_signal) / math.sqrt(d_signal * k_vec)
+        )
 
     def forward(self, tokens: torch.Tensor):
         # (B,T)
         B, T = tokens.shape
         device, dtype = tokens.device, self.embed.dtype
         E = self.embed[tokens]  # (B,T,k,d)
-        E = l2_normalize(E)     # unit radius β=1
-        noise = torch.randn(B, T, self.k, self.m, device=device, dtype=dtype) * self.sigma
+        E = l2_normalize(E)  # unit radius β=1
+        noise = (
+            torch.randn(B, T, self.k, self.m, device=device, dtype=dtype) * self.sigma
+        )
         V = torch.cat([E, noise], dim=-1)  # (B,T,k,N)
         K = random_orthogonal(self.N, device=device, dtype=dtype)
         C = torch.einsum("ij,btkj->btki", K, V)  # ciphertext manifold
@@ -111,9 +115,13 @@ class ClientFront(nn.Module):
 
 
 class ServerCore(nn.Module):
-    def __init__(self, N: int, k_vec: int, layers: int = 4, heads: int = 4):
+    def __init__(
+        self, N: int, k_vec: int, layers: int = 4, heads: int = 4, rank: int = 4
+    ):
         super().__init__()
-        self.blocks = nn.ModuleList([EBlock(N, k_vec, heads) for _ in range(layers)])
+        self.blocks = nn.ModuleList(
+            [EBlock(N, k_vec, heads, rank) for _ in range(layers)]
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for blk in self.blocks:
@@ -132,5 +140,5 @@ class ClientBack(nn.Module):
     def forward(self, x_rot: torch.Tensor, K: torch.Tensor):
         x = torch.einsum("ij,btkj->btki", K.t(), x_rot)  # decrypt
         x_sig = x[..., : self.d]
-        logits = self.head((x_sig ** 2).sum(dim=-1))
+        logits = self.head((x_sig**2).sum(dim=-1))
         return logits

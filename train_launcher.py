@@ -7,6 +7,7 @@ Usage:
     python train_launcher.py --config configs/base_config.yaml
     python train_launcher.py --config configs/base_config.yaml --experiment_name my_experiment
     python train_launcher.py --config configs/base_config.yaml --resume checkpoints/latest_checkpoint.pt
+    python train_launcher.py --config configs/base_config.yaml --count_params
 """
 
 import argparse
@@ -107,6 +108,12 @@ def main():
     )
     
     parser.add_argument(
+        "--count_params",
+        action="store_true",
+        help="Display parameter count breakdown and exit"
+    )
+    
+    parser.add_argument(
         "--experiment_name",
         type=str,
         help="Override experiment name from config"
@@ -162,6 +169,29 @@ def main():
     
     # Create training configuration
     training_config = create_training_config(flattened_config)
+    
+    # If only counting parameters, do that and exit
+    if args.count_params:
+        # Import here to avoid unnecessary imports when just counting params
+        from secure_transformer.train import SecureTransformer
+        
+        model = SecureTransformer(training_config)
+        
+        # Count parameters for each component
+        client_front_params = sum(p.numel() for p in model.client_front.parameters())
+        server_core_params = sum(p.numel() for p in model.server_core.parameters())
+        client_back_params = sum(p.numel() for p in model.client_back.parameters())
+        total_params = sum(p.numel() for p in model.parameters())
+        
+        # Print breakdown
+        print("Config: ", config["model"])
+
+        print("Parameter Distribution:")
+        print(f"  ClientFront:  {client_front_params:>12,} ({client_front_params/total_params*100:.1f}%)")
+        print(f"  ServerCore:   {server_core_params:>12,} ({server_core_params/total_params*100:.1f}%)")
+        print(f"  ClientBack:   {client_back_params:>12,} ({client_back_params/total_params*100:.1f}%)")
+        print(f"  Total:        {total_params:>12,}")
+        return
     
     # Print configuration summary
     print("=" * 60)

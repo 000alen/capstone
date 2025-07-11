@@ -1,0 +1,7 @@
+---
+alwaysApply: true
+---
+
+- we use `uv` for the python environment
+- use `uv add` to add packages
+- use `uv run` to run a script or python, etc

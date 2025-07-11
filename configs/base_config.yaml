@@ -2,13 +2,13 @@
 
 # Model Architecture
 model:
-  d_signal: 128          # Signal dimension (real coordinates)
-  m_noise: 64           # Noise dimension (added for security)
-  k_vec: 16             # Vector dimension per token
-  layers: 6             # Number of transformer layers
-  heads: 8              # Number of attention heads
-  rank: 8               # Lie algebra rank for residual connections
-  sigma: 1.0            # Noise scale
+  d_signal: 128 # Signal dimension (real coordinates)
+  m_noise: 64 # Noise dimension (added for security)
+  k_vec: 16 # Vector dimension per token
+  layers: 12 # Number of transformer layers
+  heads: 8 # Number of attention heads
+  rank: 32 # Lie algebra rank for residual connections
+  sigma: 1.0 # Noise scale
 
 # Training Hyperparameters
 training:
@@ -35,10 +35,10 @@ data:
 # Experiment Tracking
 experiment:
   project_name: "secure-transformer"
-  experiment_name: null  # Will be auto-generated if null
+  experiment_name: null # Will be auto-generated if null
   checkpoint_dir: "./checkpoints"
   log_level: "INFO"
 
 # Hardware
 hardware:
-  device: "auto"  # "auto", "cuda", "cpu" 
+  device: "auto" # "auto", "cuda", "cpu"
