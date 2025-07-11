@@ -25,7 +25,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
 import wandb
-from datasets import load_dataset # type: ignore
+from datasets import load_dataset  # type: ignore
 from transformers import AutoTokenizer
 
 from .config import TrainingConfig
@@ -183,8 +183,16 @@ class Trainer:
         self.epoch = 0
         self.best_val_loss = float("inf")
 
+        # Time tracking for estimates
+        self.training_start_time = None
+        self.step_times = []  # Track recent step times for moving average
+        self.max_step_times = 100  # Keep last 100 step times for averaging
+
         # Load data
         self.train_loader, self.val_loader = self._load_data()
+
+        # Calculate total steps for time estimation
+        self.total_steps = len(self.train_loader) * self.config.max_epochs
 
         # Initialize scheduler
         self.scheduler = self._create_scheduler()
@@ -283,6 +291,8 @@ class Trainer:
 
     def train_step(self, batch) -> Dict[str, float]:
         """Single training step"""
+        step_start_time = time.time()
+
         self.model.train()
 
         input_ids, target_ids = batch
@@ -307,6 +317,14 @@ class Trainer:
         self.scheduler.step()
         self.step += 1
 
+        # Track step time
+        step_time = time.time() - step_start_time
+        self.step_times.append(step_time)
+
+        # Keep only recent step times for moving average
+        if len(self.step_times) > self.max_step_times:
+            self.step_times.pop(0)
+
         # Compute metrics
         perplexity = self._compute_perplexity(loss)
 
@@ -315,6 +333,7 @@ class Trainer:
             "train_perplexity": perplexity.item(),
             "grad_norm": grad_norm.item(),
             "learning_rate": self.scheduler.get_last_lr()[0],
+            "step_time": step_time,
         }
 
     @torch.no_grad()
@@ -351,6 +370,8 @@ class Trainer:
             "scheduler_state_dict": self.scheduler.state_dict(),
             "config": self.config,
             "best_val_loss": self.best_val_loss,
+            "training_start_time": self.training_start_time,
+            "step_times": self.step_times,
         }
 
         # Save regular checkpoint
@@ -388,7 +409,21 @@ class Trainer:
             self.epoch = checkpoint["epoch"]
             self.best_val_loss = checkpoint["best_val_loss"]
 
+            # Load timing information if available (for backwards compatibility)
+            if "training_start_time" in checkpoint:
+                self.training_start_time = checkpoint["training_start_time"]
+            if "step_times" in checkpoint:
+                self.step_times = checkpoint["step_times"]
+
             self.logger.info(f"Loaded checkpoint from step {self.step}")
+
+            # Log time information if available
+            if self.training_start_time:
+                time_estimates = self._get_time_estimates()
+                self.logger.info(
+                    f"Resumed training - Elapsed: {time_estimates['elapsed']}, ETA: {time_estimates['total']}"
+                )
+
             return True
 
         except Exception as e:
@@ -398,6 +433,14 @@ class Trainer:
     def train(self):
         """Main training loop"""
         self.logger.info("Starting training...")
+
+        # Set training start time
+        self.training_start_time = time.time()
+
+        # Log training overview
+        self.logger.info(f"Total steps: {self.total_steps:,}")
+        self.logger.info(f"Steps per epoch: {len(self.train_loader):,}")
+        self.logger.info(f"Total epochs: {self.config.max_epochs}")
 
         for epoch in range(self.epoch, self.config.max_epochs):
             self.epoch = epoch
@@ -409,12 +452,27 @@ class Trainer:
 
                 # Log training metrics
                 if self.step % 50 == 0:
+                    # Add time estimates to metrics
+                    time_estimates = self._get_time_estimates()
+                    metrics.update(time_estimates)
                     wandb.log(metrics, step=self.step)
 
                 # Validation
                 if self.step % self.config.eval_interval == 0:
                     val_metrics = self.validate()
-                    wandb.log(val_metrics, step=self.step)
+
+                    # Get time estimates and progress info
+                    time_estimates = self._get_time_estimates()
+                    progress_percent = (self.step / self.total_steps) * 100
+
+                    wandb.log(
+                        {
+                            **val_metrics,
+                            **time_estimates,
+                            "progress_percent": progress_percent,
+                        },
+                        step=self.step,
+                    )
 
                     # Check if best model
                     is_best = val_metrics["val_loss"] < self.best_val_loss
@@ -422,10 +480,13 @@ class Trainer:
                         self.best_val_loss = val_metrics["val_loss"]
 
                     self.logger.info(
-                        f"Step {self.step}: "
+                        f"Step {self.step}/{self.total_steps} ({progress_percent:.1f}%): "
                         f"train_loss={metrics['train_loss']:.4f}, "
                         f"val_loss={val_metrics['val_loss']:.4f}, "
-                        f"val_ppl={val_metrics['val_perplexity']:.2f}"
+                        f"val_ppl={val_metrics['val_perplexity']:.2f} | "
+                        f"Elapsed: {time_estimates['elapsed']}, "
+                        f"Remaining: {time_estimates['remaining']}, "
+                        f"ETA: {time_estimates['total']}"
                     )
 
                     # Save checkpoint
@@ -434,13 +495,68 @@ class Trainer:
 
             # End of epoch
             epoch_time = time.time() - epoch_start_time
-            self.logger.info(f"Epoch {epoch} completed in {epoch_time:.2f}s")
+            time_estimates = self._get_time_estimates()
+            epochs_remaining = self.config.max_epochs - (epoch + 1)
+
+            self.logger.info(
+                f"Epoch {epoch + 1}/{self.config.max_epochs} completed in {epoch_time:.2f}s | "
+                f"Epochs remaining: {epochs_remaining} | "
+                f"Total elapsed: {time_estimates['elapsed']}, "
+                f"ETA: {time_estimates['total']}"
+            )
 
             # Save checkpoint at end of epoch
             self.save_checkpoint()
 
         self.logger.info("Training completed!")
+        final_time = self._get_time_estimates()
+        self.logger.info(f"Total training time: {final_time['elapsed']}")
         wandb.finish()
+
+    def _format_time(self, seconds: float) -> str:
+        """Format time in a human-readable way"""
+        if seconds < 60:
+            return f"{seconds:.0f}s"
+        elif seconds < 3600:
+            minutes = seconds / 60
+            return f"{minutes:.1f}m"
+        elif seconds < 86400:
+            hours = seconds / 3600
+            return f"{hours:.1f}h"
+        else:
+            days = seconds / 86400
+            return f"{days:.1f}d"
+
+    def _get_time_estimates(self) -> Dict[str, str]:
+        """Calculate time estimates based on current progress"""
+        if self.training_start_time is None or self.step == 0:
+            return {
+                "elapsed": "0s",
+                "remaining": "calculating...",
+                "total": "calculating...",
+                "avg_step_time": "calculating...",
+            }
+
+        # Calculate elapsed time
+        elapsed = time.time() - self.training_start_time
+
+        # Calculate average step time from recent steps
+        if len(self.step_times) > 0:
+            avg_step_time = sum(self.step_times) / len(self.step_times)
+        else:
+            avg_step_time = elapsed / max(self.step, 1)
+
+        # Calculate remaining steps and estimated time
+        remaining_steps = max(0, self.total_steps - self.step)
+        estimated_remaining = remaining_steps * avg_step_time
+        estimated_total = elapsed + estimated_remaining
+
+        return {
+            "elapsed": self._format_time(elapsed),
+            "remaining": self._format_time(estimated_remaining),
+            "total": self._format_time(estimated_total),
+            "avg_step_time": f"{avg_step_time:.2f}s",
+        }
 
 
 def main():
