@@ -17,69 +17,19 @@ import argparse
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple
-from dataclasses import dataclass
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
 import wandb
-from datasets import load_dataset
+from datasets import load_dataset # type: ignore
 from transformers import AutoTokenizer
 
-from .model import ClientFront, ServerCore, ClientBack
-
-
-@dataclass
-class TrainingConfig:
-    """Training configuration parameters"""
-
-    # Model architecture
-    vocab_size: int = 50257
-    d_signal: int = 128
-    m_noise: int = 64
-    k_vec: int = 16
-    layers: int = 6
-    heads: int = 8
-    rank: int = 8
-    sigma: float = 1.0
-
-    # Training hyperparameters
-    batch_size: int = 32
-    sequence_length: int = 512
-    learning_rate: float = 3e-4
-    weight_decay: float = 0.1
-    beta1: float = 0.9
-    beta2: float = 0.95
-    grad_clip_norm: float = 1.0
-
-    # Training schedule
-    max_epochs: int = 50
-    warmup_steps: int = 2000
-    eval_interval: int = 500
-    save_interval: int = 1000
-
-    # Data
-    dataset_name: str = "wikitext"
-    dataset_config: str = "wikitext-103-raw-v1"
-    tokenizer_name: str = "gpt2"
-    max_dataset_tokens: Optional[int] = (
-        None  # Limit dataset size for testing (None = full dataset)
-    )
-
-    # Logging and checkpointing
-    project_name: str = "secure-transformer"
-    experiment_name: Optional[str] = None
-    checkpoint_dir: str = "./checkpoints"
-    log_level: str = "INFO"
-
-    # Hardware
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    num_workers: int = 4
-    pin_memory: bool = True
+from .config import TrainingConfig
+from .model import SecureTransformer
 
 
 class WikiTextDataset(Dataset):
@@ -109,9 +59,6 @@ class WikiTextDataset(Dataset):
         """Initialize dataset by processing it once to get sequence count and cache article boundaries"""
         self.article_boundaries = []  # (start_idx, end_idx) for each article
         self.total_tokens = 0
-
-        # Process dataset to find article boundaries and total length
-        current_tokens = []
 
         for i, example in enumerate(self.dataset):
             text = example["text"].strip()
@@ -201,50 +148,6 @@ class WikiTextDataset(Dataset):
                     break
 
         return tokens
-
-
-class SecureTransformer(nn.Module):
-    """Complete secure transformer model combining all components"""
-
-    def __init__(self, config: TrainingConfig):
-        super().__init__()
-        self.config = config
-
-        self.client_front = ClientFront(
-            vocab=config.vocab_size,
-            d_signal=config.d_signal,
-            m_noise=config.m_noise,
-            k_vec=config.k_vec,
-            sigma=config.sigma,
-        )
-
-        self.server_core = ServerCore(
-            N=config.d_signal + config.m_noise,
-            k_vec=config.k_vec,
-            layers=config.layers,
-            heads=config.heads,
-            rank=config.rank,
-        )
-
-        self.client_back = ClientBack(
-            vocab=config.vocab_size,
-            d_signal=config.d_signal,
-            m_noise=config.m_noise,
-            k_vec=config.k_vec,
-        )
-
-    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
-        """Forward pass through the secure transformer"""
-        # Client front: embed, add noise, rotate
-        encrypted, rotation = self.client_front(tokens)
-
-        # Server processing: equivariant computation
-        processed = self.server_core(encrypted)
-
-        # Client back: decrypt and get logits
-        logits = self.client_back(processed, rotation)
-
-        return logits
 
 
 class Trainer:

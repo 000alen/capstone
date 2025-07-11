@@ -12,7 +12,6 @@ Usage:
 
 import argparse
 import yaml
-import os
 import sys
 from pathlib import Path
 
@@ -173,7 +172,7 @@ def main():
     # If only counting parameters, do that and exit
     if args.count_params:
         # Import here to avoid unnecessary imports when just counting params
-        from secure_transformer.train import SecureTransformer
+        from secure_transformer.model import SecureTransformer
         
         model = SecureTransformer(training_config)
         

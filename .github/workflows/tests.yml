@@ -73,5 +73,5 @@ jobs:
       run: |
         uv run python -c "from secure_transformer.model import ClientFront, ServerCore, ClientBack; print('Model imports successful')"
         uv run python -c "from secure_transformer.utils import random_orthogonal, l2_normalize; print('Utils imports successful')"
-        uv run python -c "from secure_transformer.train import SecureTransformer, TrainingConfig; print('Training imports successful')"
+        uv run python -c "from secure_transformer.model import SecureTransformer; print('Training imports successful')"
         uv run python -c "from secure_transformer.evaluate import Evaluator; print('Evaluation imports successful')" 

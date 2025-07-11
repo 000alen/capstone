@@ -21,7 +21,8 @@ from transformers import AutoTokenizer
 import numpy as np
 import numpy.typing as npt
 
-from .train import WikiTextDataset, SecureTransformer
+from .train import WikiTextDataset
+from .model import SecureTransformer
 
 
 class Evaluator:
