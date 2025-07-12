@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Convenient launcher script for training the secure transformer.
 Uses YAML configuration files for experiment management.
@@ -10,19 +11,38 @@ Usage:
     python train_launcher.py --config configs/base_config.yaml --count_params
 """
 
+import logging
 import argparse
 import yaml
-import sys
-from pathlib import Path
-
-# Add the secure_transformer module to the path
-sys.path.append(str(Path(__file__).parent))
-
+import colorlog
 from secure_transformer.train import Trainer, TrainingConfig
+
+# Configure colored logging
+handler = colorlog.StreamHandler()
+handler.setFormatter(
+    colorlog.ColoredFormatter(
+        "%(log_color)s%(levelname)s: %(message)s%(reset)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        log_colors={
+            "DEBUG": "cyan",
+            "INFO": "green",
+            "WARNING": "yellow",
+            "ERROR": "red",
+            "CRITICAL": "bold_red",
+        },
+    )
+)
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(handler)
+
+logger = logging.getLogger("train_launcher")
 
 
 def load_config(config_path: str) -> dict:
     """Load configuration from YAML file"""
+
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
     return config
@@ -30,6 +50,7 @@ def load_config(config_path: str) -> dict:
 
 def flatten_config(config: dict, prefix: str = "") -> dict:
     """Flatten nested config dictionary"""
+
     flattened = {}
     for key, value in config.items():
         if isinstance(value, dict):
@@ -43,6 +64,7 @@ def flatten_config(config: dict, prefix: str = "") -> dict:
 
 def create_training_config(config_dict: dict) -> TrainingConfig:
     """Create TrainingConfig from flattened config dictionary"""
+
     # Map YAML config keys to TrainingConfig fields
     config_mapping = {
         # Model parameters
@@ -135,7 +157,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Load and flatten config
     config = load_config(args.config)
     flattened_config = flatten_config(config)
 
@@ -151,12 +172,11 @@ def main():
     if args.checkpoint_dir:
         flattened_config["experiment_checkpoint_dir"] = args.checkpoint_dir
 
-    # Create training configuration
     training_config = create_training_config(flattened_config)
 
-    # If only counting parameters, do that and exit
     if args.count_params:
-        # Import here to avoid unnecessary imports when just counting params
+        import json
+
         from secure_transformer.model import SecureTransformer
 
         model = SecureTransformer(training_config)
@@ -168,61 +188,58 @@ def main():
         total_params = sum(p.numel() for p in model.parameters())
 
         # Print breakdown
-        print("Config: ", config["model"])
+        logging.info("config: %s", json.dumps(config["model"], indent=2))
 
-        print("Parameter Distribution:")
-        print(
-            f"  ClientFront:  {client_front_params:>12,} ({client_front_params/total_params*100:.1f}%)"
+        logging.info("parameter distribution:")
+
+        logging.info(
+            f"ClientFront: {client_front_params:,} ({client_front_params/total_params*100:.1f}%)"
         )
-        print(
-            f"  ServerCore:   {server_core_params:>12,} ({server_core_params/total_params*100:.1f}%)"
+
+        logging.info(
+            f"ServerCore: {server_core_params:,} ({server_core_params/total_params*100:.1f}%)"
         )
-        print(
-            f"  ClientBack:   {client_back_params:>12,} ({client_back_params/total_params*100:.1f}%)"
+
+        logging.info(
+            f"ClientBack: {client_back_params:,} ({client_back_params/total_params*100:.1f}%)"
         )
-        print(f"  Total:        {total_params:>12,}")
+
+        logging.info(f"total: {total_params:,}")
+
         return
 
-    # Print configuration summary
-    print("=" * 60)
-    print("SECURE TRANSFORMER TRAINING")
-    print("=" * 60)
-    print(f"Config file: {args.config}")
-    print(f"Experiment: {training_config.experiment_name}")
-    print(f"Device: {training_config.device}")
-    print(
+    logging.info(f"config: {args.config}")
+    logging.info(f"experiment: {training_config.experiment_name}")
+    logging.info(f"device: {training_config.device}")
+    logging.info(
         f"Model size: d={training_config.d_signal}, m={training_config.m_noise}, k={training_config.k_vec}"
     )
-    print(
-        f"Architecture: {training_config.layers} layers, {training_config.heads} heads"
+    logging.info(
+        f"architecture: {training_config.layers} layers, {training_config.heads} heads"
     )
-    print(
+    logging.info(
         f"Training: {training_config.max_epochs} epochs, lr={training_config.learning_rate}"
     )
-    print(
-        f"Batch size: {training_config.batch_size}, seq_len={training_config.sequence_length}"
+    logging.info(
+        f"batch size: {training_config.batch_size}, seq_len={training_config.sequence_length}"
     )
-    print("=" * 60)
 
-    # Initialize trainer
     trainer = Trainer(training_config)
 
-    # Resume from checkpoint if specified
     if args.resume:
-        print(f"Resuming from checkpoint: {args.resume}")
+        logging.info(f"resuming from checkpoint: {args.resume}")
         if not trainer.load_checkpoint(args.resume):
-            print("Failed to load checkpoint. Starting from scratch.")
+            logging.info("failed to load checkpoint. starting from scratch.")
 
-    # Start training
     try:
         trainer.train()
     except KeyboardInterrupt:
-        print("\nTraining interrupted by user. Saving checkpoint...")
+        logging.info("\ntraining interrupted by user. saving checkpoint...")
         trainer.save_checkpoint()
-        print("Checkpoint saved. Training stopped.")
+        logging.info("checkpoint saved. training stopped.")
     except Exception as e:
-        print(f"\nTraining failed with error: {e}")
-        print("Saving emergency checkpoint...")
+        logging.info(f"\ntraining failed with error: {e}")
+        logging.info("saving emergency checkpoint...")
         trainer.save_checkpoint()
         raise
 

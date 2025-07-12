@@ -3,6 +3,7 @@ import math
 import time
 import argparse
 import logging
+import typing
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -23,6 +24,17 @@ from .model import SecureTransformer
 class WikiTextDataset(Dataset):
     """Memory-efficient WikiText-103 dataset with lazy loading"""
 
+    split: str
+    tokenizer: AutoTokenizer
+    sequence_length: int
+    max_length: Optional[int] = None
+    dataset: Dataset
+    estimated_num_sequences: int
+
+    _article_cache: Dict[int, typing.List[int]]
+    _cache_hits: int
+    _cache_misses: int
+
     def __init__(
         self,
         split: str,
@@ -35,12 +47,10 @@ class WikiTextDataset(Dataset):
         self.sequence_length = sequence_length
         self.max_length = max_length  # Optional limit for testing
 
-        # Load dataset in streaming mode to avoid loading all into memory
         self.dataset = load_dataset(
             "wikitext", "wikitext-103-raw-v1", split=split, streaming=True
         )
 
-        # Quick initialization without processing entire dataset
         self._initialize_lazy()
 
     def _initialize_lazy(self):
@@ -194,21 +204,21 @@ class Trainer:
         logging.basicConfig(level=getattr(logging, config.log_level))
         self.logger = logging.getLogger(__name__)
 
-        self.logger.info("🚀 Initializing Secure Transformer Training...")
+        self.logger.info("Initializing Secure Transformer Training...")
 
         # Create checkpoint directory
-        self.logger.info("📁 Setting up checkpoint directory...")
+        self.logger.info("Setting up checkpoint directory...")
         Path(config.checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
         # Initialize model
-        self.logger.info("🧠 Initializing model...")
+        self.logger.info("Initializing model...")
         self.model = SecureTransformer(config).to(self.device)
         self.logger.info(
-            f"✅ Model initialized with {sum(p.numel() for p in self.model.parameters()):,} parameters"
+            f"Model initialized with {sum(p.numel() for p in self.model.parameters()):,} parameters"
         )
 
         # Initialize optimizer
-        self.logger.info("⚡ Setting up optimizer...")
+        self.logger.info("Setting up optimizer...")
         self.optimizer = AdamW(
             self.model.parameters(),
             lr=config.learning_rate,
@@ -233,11 +243,11 @@ class Trainer:
         self.total_steps = len(self.train_loader) * self.config.max_epochs
 
         # Initialize scheduler
-        self.logger.info("📈 Setting up learning rate scheduler...")
+        self.logger.info("Setting up learning rate scheduler...")
         self.scheduler = self._create_scheduler()
 
         # Initialize wandb
-        self.logger.info("📊 Initializing Weights & Biases...")
+        self.logger.info("Initializing Weights & Biases...")
         if config.experiment_name is None:
             config.experiment_name = f"secure-transformer-{int(time.time())}"
 
@@ -250,10 +260,10 @@ class Trainer:
         # Log model architecture
         wandb.watch(self.model, log_freq=100)
 
-        self.logger.info("✅ Initialization complete! Ready to train.")
-        self.logger.info(f"🎯 Experiment: {config.experiment_name}")
-        self.logger.info(f"🔧 Device: {self.device}")
-        self.logger.info(f"📏 Total training steps: {self.total_steps:,}")
+        self.logger.info("Initialization complete! Ready to train.")
+        self.logger.info(f"Experiment: {config.experiment_name}")
+        self.logger.info(f"Device: {self.device}")
+        self.logger.info(f"Total training steps: {self.total_steps:,}")
 
     def _create_scheduler(self):
         """Create learning rate scheduler with warmup and cosine annealing"""
@@ -283,20 +293,20 @@ class Trainer:
 
     def _load_data(self) -> Tuple[DataLoader, DataLoader]:
         """Load and prepare WikiText-103 dataset"""
-        self.logger.info("🔄 Loading data and initializing datasets...")
+        self.logger.info("Loading data and initializing datasets...")
 
         # Initialize tokenizer
-        self.logger.info("📝 Loading tokenizer...")
+        self.logger.info("Loading tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained(self.config.tokenizer_name)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
         # Update vocab size to match tokenizer
         self.config.vocab_size = len(tokenizer)
-        self.logger.info(f"✅ Tokenizer loaded: vocab_size={self.config.vocab_size}")
+        self.logger.info(f"Tokenizer loaded: vocab_size={self.config.vocab_size}")
 
         # Create datasets with progress logging
-        self.logger.info("📚 Creating training dataset...")
+        self.logger.info("Creating training dataset...")
         train_dataset = WikiTextDataset(
             "train",
             tokenizer,
@@ -304,7 +314,7 @@ class Trainer:
             self.config.max_dataset_tokens,
         )
 
-        self.logger.info("📖 Creating validation dataset...")
+        self.logger.info("Creating validation dataset...")
         val_dataset = WikiTextDataset(
             "validation",
             tokenizer,
@@ -313,7 +323,7 @@ class Trainer:
         )
 
         # Create data loaders
-        self.logger.info("⚙️  Creating data loaders...")
+        self.logger.info("Creating data loaders...")
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.config.batch_size,
@@ -330,11 +340,11 @@ class Trainer:
             pin_memory=self.config.pin_memory,
         )
 
-        self.logger.info(f"✅ Data loading complete:")
-        self.logger.info(f"   📊 Training batches: {len(train_loader):,}")
-        self.logger.info(f"   📊 Validation batches: {len(val_loader):,}")
-        self.logger.info(f"   📊 Batch size: {self.config.batch_size}")
-        self.logger.info(f"   📊 Sequence length: {self.config.sequence_length}")
+        self.logger.info(f"Data loading complete:")
+        self.logger.info(f"Training batches: {len(train_loader):,}")
+        self.logger.info(f"Validation batches: {len(val_loader):,}")
+        self.logger.info(f"Batch size: {self.config.batch_size}")
+        self.logger.info(f"Sequence length: {self.config.sequence_length}")
 
         return train_loader, val_loader
 
@@ -556,7 +566,7 @@ class Trainer:
                 if self.step % 1000 == 0 and self.step > 0:
                     try:
                         train_cache_stats = self.train_loader.dataset.get_cache_stats()
-                        self.logger.info(f"📊 Dataset cache stats: {train_cache_stats}")
+                        self.logger.info(f"Dataset cache stats: {train_cache_stats}")
                     except Exception:
                         pass  # Ignore if cache stats not available
 
@@ -582,7 +592,7 @@ class Trainer:
         # Final cache statistics
         try:
             train_cache_stats = self.train_loader.dataset.get_cache_stats()
-            self.logger.info(f"📊 Final dataset cache stats: {train_cache_stats}")
+            self.logger.info(f"Final dataset cache stats: {train_cache_stats}")
         except Exception:
             pass
 
@@ -640,7 +650,6 @@ def main():
         description="Train secure transformer on WikiText-103"
     )
 
-    # Model parameters
     parser.add_argument("--d_signal", type=int, default=128, help="Signal dimension")
     parser.add_argument("--m_noise", type=int, default=64, help="Noise dimension")
     parser.add_argument("--k_vec", type=int, default=16, help="Vector dimension")
@@ -650,7 +659,6 @@ def main():
     )
     parser.add_argument("--rank", type=int, default=8, help="Lie algebra rank")
 
-    # Training parameters
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument(
         "--sequence_length", type=int, default=512, help="Sequence length"
@@ -661,14 +669,12 @@ def main():
     parser.add_argument("--max_epochs", type=int, default=50, help="Maximum epochs")
     parser.add_argument("--warmup_steps", type=int, default=2000, help="Warmup steps")
 
-    # Data parameters
     parser.add_argument(
         "--max_dataset_tokens",
         type=int,
         help="Limit dataset size for testing (default: full dataset)",
     )
 
-    # Experiment parameters
     parser.add_argument("--experiment_name", type=str, help="Experiment name")
     parser.add_argument(
         "--checkpoint_dir",
@@ -680,17 +686,13 @@ def main():
 
     args = parser.parse_args()
 
-    # Create config
     config = TrainingConfig(**vars(args))
 
-    # Initialize trainer
     trainer = Trainer(config)
 
-    # Resume from checkpoint if specified
     if args.resume:
         trainer.load_checkpoint(args.resume)
 
-    # Start training
     trainer.train()
 
 
