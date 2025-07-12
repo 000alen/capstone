@@ -1,15 +1,3 @@
-"""
-Complete training script for the IND-CPA-secure SO(N)-equivariant transformer.
-
-Features:
-- WikiText-103 dataset loading and preprocessing
-- Wandb integration for experiment tracking
-- Checkpointing and resuming
-- Validation and perplexity evaluation
-- Learning rate scheduling
-- Gradient clipping and monitoring
-"""
-
 import os
 import math
 import time
@@ -58,7 +46,7 @@ class WikiTextDataset(Dataset):
     def _initialize_lazy(self):
         """Fast initialization with lazy loading - estimate size without full processing"""
         logging.info(f"Initializing {self.__class__.__name__} with lazy loading...")
-        
+
         # For WikiText-103, we know approximate sizes to avoid full scan
         # These are rough estimates to get started quickly
         if self.max_length:
@@ -66,20 +54,22 @@ class WikiTextDataset(Dataset):
         else:
             # Rough estimates for WikiText-103 splits
             estimates = {
-                "train": 100_000_000,      # ~100M tokens
-                "validation": 200_000,     # ~200K tokens  
-                "test": 240_000           # ~240K tokens
+                "train": 100_000_000,  # ~100M tokens
+                "validation": 200_000,  # ~200K tokens
+                "test": 240_000,  # ~240K tokens
             }
             estimated_tokens = estimates.get(self.split, estimates["train"])
-        
+
         # Estimate number of sequences
-        self.estimated_num_sequences = max(1, (estimated_tokens - 1) // self.sequence_length)
-        
+        self.estimated_num_sequences = max(
+            1, (estimated_tokens - 1) // self.sequence_length
+        )
+
         # Cache for processed articles to avoid re-tokenization
         self._article_cache = {}
         self._cache_hits = 0
         self._cache_misses = 0
-        
+
         logging.info(
             f"Lazy initialization complete for '{self.split}' split: "
             f"estimated ~{estimated_tokens:,} tokens, "
@@ -98,7 +88,7 @@ class WikiTextDataset(Dataset):
         # Calculate which articles and positions we need for this sequence
         target_start_pos = idx * self.sequence_length
         target_end_pos = target_start_pos + self.sequence_length + 1  # +1 for target
-        
+
         # Get tokens for this range with lazy loading
         tokens = self._get_tokens_lazy(target_start_pos, target_end_pos)
 
@@ -120,13 +110,13 @@ class WikiTextDataset(Dataset):
         tokens = []
         current_pos = 0
         articles_processed = 0
-        
+
         # Iterator through dataset
         for article_idx, example in enumerate(self.dataset):
             text = example["text"].strip()
             if not text:  # Skip empty lines
                 continue
-                
+
             # Check cache first
             if article_idx in self._article_cache:
                 article_tokens = self._article_cache[article_idx]
@@ -138,13 +128,13 @@ class WikiTextDataset(Dataset):
                 if len(article_tokens) < 10000:  # Cache articles < 10K tokens
                     self._article_cache[article_idx] = article_tokens
                 self._cache_misses += 1
-            
+
             if not article_tokens:
                 continue
-                
+
             article_start = current_pos
             article_end = current_pos + len(article_tokens)
-            
+
             # Check if this article overlaps with our desired range
             if article_end <= start_pos:
                 # Article is completely before our range
@@ -153,41 +143,43 @@ class WikiTextDataset(Dataset):
             elif article_start >= end_pos:
                 # Article is completely after our range - we can stop
                 break
-                
+
             # This article overlaps with our range
             article_relative_start = max(0, start_pos - article_start)
             article_relative_end = min(len(article_tokens), end_pos - article_start)
 
             if article_relative_end > article_relative_start:
-                needed_tokens = article_tokens[article_relative_start:article_relative_end]
+                needed_tokens = article_tokens[
+                    article_relative_start:article_relative_end
+                ]
                 tokens.extend(needed_tokens)
 
                 # If we have enough tokens, we can stop
                 if len(tokens) >= (end_pos - start_pos):
                     break
-                    
+
             current_pos = article_end
             articles_processed += 1
-            
+
             # Optional: limit processing for testing
             if self.max_length and current_pos >= self.max_length:
                 break
-                
+
             # Early stopping if we've found enough tokens
             if len(tokens) >= (end_pos - start_pos):
                 break
 
         return tokens
-    
+
     def get_cache_stats(self):
         """Get caching statistics for debugging"""
         total_requests = self._cache_hits + self._cache_misses
         hit_rate = self._cache_hits / max(total_requests, 1) * 100
         return {
             "cache_hits": self._cache_hits,
-            "cache_misses": self._cache_misses, 
+            "cache_misses": self._cache_misses,
             "hit_rate": f"{hit_rate:.1f}%",
-            "cached_articles": len(self._article_cache)
+            "cached_articles": len(self._article_cache),
         }
 
 
@@ -201,7 +193,7 @@ class Trainer:
         # Setup logging
         logging.basicConfig(level=getattr(logging, config.log_level))
         self.logger = logging.getLogger(__name__)
-        
+
         self.logger.info("🚀 Initializing Secure Transformer Training...")
 
         # Create checkpoint directory
@@ -257,7 +249,7 @@ class Trainer:
 
         # Log model architecture
         wandb.watch(self.model, log_freq=100)
-        
+
         self.logger.info("✅ Initialization complete! Ready to train.")
         self.logger.info(f"🎯 Experiment: {config.experiment_name}")
         self.logger.info(f"🔧 Device: {self.device}")
@@ -292,7 +284,7 @@ class Trainer:
     def _load_data(self) -> Tuple[DataLoader, DataLoader]:
         """Load and prepare WikiText-103 dataset"""
         self.logger.info("🔄 Loading data and initializing datasets...")
-        
+
         # Initialize tokenizer
         self.logger.info("📝 Loading tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained(self.config.tokenizer_name)
@@ -311,7 +303,7 @@ class Trainer:
             self.config.sequence_length,
             self.config.max_dataset_tokens,
         )
-        
+
         self.logger.info("📖 Creating validation dataset...")
         val_dataset = WikiTextDataset(
             "validation",
@@ -337,7 +329,7 @@ class Trainer:
             num_workers=self.config.num_workers,
             pin_memory=self.config.pin_memory,
         )
-        
+
         self.logger.info(f"✅ Data loading complete:")
         self.logger.info(f"   📊 Training batches: {len(train_loader):,}")
         self.logger.info(f"   📊 Validation batches: {len(val_loader):,}")
@@ -559,7 +551,7 @@ class Trainer:
                     # Save checkpoint
                     if self.step % self.config.save_interval == 0:
                         self.save_checkpoint(is_best)
-                        
+
                 # Log cache statistics periodically (every 1000 steps)
                 if self.step % 1000 == 0 and self.step > 0:
                     try:
@@ -586,14 +578,14 @@ class Trainer:
         self.logger.info("Training completed!")
         final_time = self._get_time_estimates()
         self.logger.info(f"Total training time: {final_time['elapsed']}")
-        
+
         # Final cache statistics
         try:
             train_cache_stats = self.train_loader.dataset.get_cache_stats()
             self.logger.info(f"📊 Final dataset cache stats: {train_cache_stats}")
         except Exception:
             pass
-            
+
         wandb.finish()
 
     def _format_time(self, seconds: float) -> str:
