@@ -1,4 +1,10 @@
+*.pt
+
+_build/
+_static/
+_templates/
 checkpoints/
+wandb/
 
 # Python-generated files
 __pycache__/

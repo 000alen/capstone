@@ -21,7 +21,7 @@ from transformers import AutoTokenizer
 import numpy as np
 import numpy.typing as npt
 
-from .train import WikiTextDataset
+from .dataset import WikiTextDataset
 from .model import SecureTransformer
 
 
