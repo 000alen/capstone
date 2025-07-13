@@ -173,6 +173,26 @@ class ETokenAttention(nn.Module):
         return out.reshape(B, T, k, n)
 
 
+class VectorMLP(nn.Module):
+    def __init__(self, k, hidden=16):
+        super().__init__()
+        self.mix1 = nn.Parameter(torch.randn(k, k) / math.sqrt(k))
+        self.mix2 = nn.Parameter(torch.randn(k, k) / math.sqrt(k))
+        self.g1 = nn.Sequential(nn.Linear(1, hidden), nn.ReLU(), nn.Linear(hidden, 1))
+        self.g2 = nn.Sequential(nn.Linear(1, hidden), nn.ReLU(), nn.Linear(hidden, 1))
+
+    def forward(self, X):  # (B,T,k,N)
+        A1 = self.mix1  # (k,k)
+        A2 = self.mix2
+        Z = torch.einsum("kl,btln->btkn", A1, X)
+        g1 = torch.sigmoid(self.g1((Z**2).sum(-1, keepdim=True)))
+        Z = g1 * Z
+        U = torch.einsum("kl,btln->btkn", A2, Z)
+        g2 = torch.sigmoid(self.g2((U**2).sum(-1, keepdim=True)))
+        Y = g2 * U
+        return X + Y
+
+
 class EBlock(nn.Module):
     """SO(n)-equivariant transformer block.
 
@@ -211,10 +231,12 @@ class EBlock(nn.Module):
         self.attn = ETokenAttention(n, k_vec, heads)
         self.lie = LieResidual(n, rank)
         self.gate = IGatedNonlinear()
+        self.mlp = VectorMLP(k_vec)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(x)
         x = x + self.lie(self.gate(x))
+        x = self.mlp(x)
         return x
 
 
