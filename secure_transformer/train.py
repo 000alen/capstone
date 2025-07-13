@@ -255,7 +255,14 @@ class Trainer:
             num_batches += 1
 
         avg_loss = total_loss / num_batches
-        perplexity = math.exp(avg_loss)
+        try:
+            perplexity = math.exp(avg_loss)
+        except OverflowError:
+            # Handle extremely large loss values that would overflow
+            self.logger.warning(
+                f"Perplexity overflow for avg_loss={avg_loss:.4f}; setting to inf."
+            )
+            perplexity = float("inf")
 
         return {"val_loss": avg_loss, "val_perplexity": perplexity}
 
