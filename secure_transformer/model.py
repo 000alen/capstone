@@ -137,7 +137,7 @@ class ETokenAttention(nn.Module):
 
     """
 
-    def __init__(self, n: int, k_vec: int, heads: int = 4):
+    def __init__(self, n: int, k_vec: int, heads: int = 4, rel_max: int = 2048):
         super().__init__()
         assert k_vec % heads == 0, "k_vec divisible by heads"
         self.h = heads
@@ -147,6 +147,16 @@ class ETokenAttention(nn.Module):
         self.ks = nn.Parameter(torch.ones(heads))
         self.vs = nn.Parameter(torch.ones(heads))
 
+        # config.rel_max = 2048
+        self.rel_bias = nn.Parameter(torch.zeros(2 * rel_max - 1, heads))
+        nn.init.trunc_normal_(self.rel_bias, std=0.02)
+
+    def _relative_bias(self, T, device):
+        Δ = torch.arange(T, device=device)
+        idx = (Δ[:, None] - Δ[None, :]).clamp(-self.rel_max + 1, self.rel_max - 1)
+        idx = idx + self.rel_max - 1
+        return self.rel_bias[idx]  # (T,T,heads)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:  # (B,T,k,n)
         B, T, k, n = x.shape
         h, d = self.h, self.d
@@ -155,6 +165,7 @@ class ETokenAttention(nn.Module):
         k_ = self.ks.view(1, 1, h, 1, 1) * xh
         v = self.vs.view(1, 1, h, 1, 1) * xh
         scores = torch.einsum("bthdn,bshdn->bhts", q, k_) / math.sqrt(n)
+        scores = scores + self._relative_bias(T, x.device).permute(2, 0, 1)
         attn = F.softmax(scores, dim=-1)
         out = torch.einsum("bhts,bshdn->bthdn", attn, v)
         return out.reshape(B, T, k, n)
