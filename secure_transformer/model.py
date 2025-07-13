@@ -141,6 +141,8 @@ class ETokenAttention(nn.Module):
         super().__init__()
         assert k_vec % heads == 0, "k_vec divisible by heads"
         self.h = heads
+        self.rel_max = rel_max
+
         self.d = k_vec // heads
         self.n = n
         self.qs = nn.Parameter(torch.ones(heads))
