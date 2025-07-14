@@ -66,6 +66,16 @@ class Trainer:
         self.step_times = []  # Track recent step times for moving average
         self.max_step_times = 100  # Keep last 100 step times for averaging
 
+        # Initialize tokenizer
+        self.logger.info("Loading tokenizer...")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.config.tokenizer_name)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        # Update vocab size to match tokenizer
+        self.config.vocab_size = len(self.tokenizer)
+        self.logger.info(f"Tokenizer loaded: vocab_size={self.config.vocab_size}")
+
         # Load data
         self.train_loader, self.val_loader = self._load_data()
 
@@ -125,21 +135,21 @@ class Trainer:
         """Load and prepare WikiText-103 dataset"""
         self.logger.info("Loading data and initializing datasets...")
 
-        # Initialize tokenizer
-        self.logger.info("Loading tokenizer...")
-        tokenizer = AutoTokenizer.from_pretrained(self.config.tokenizer_name)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
+        # # Initialize tokenizer
+        # self.logger.info("Loading tokenizer...")
+        # tokenizer = AutoTokenizer.from_pretrained(self.config.tokenizer_name)
+        # if tokenizer.pad_token is None:
+        #     tokenizer.pad_token = tokenizer.eos_token
 
-        # Update vocab size to match tokenizer
-        self.config.vocab_size = len(tokenizer)
-        self.logger.info(f"Tokenizer loaded: vocab_size={self.config.vocab_size}")
+        # # Update vocab size to match tokenizer
+        # self.config.vocab_size = len(tokenizer)
+        # self.logger.info(f"Tokenizer loaded: vocab_size={self.config.vocab_size}")
 
         # Create datasets with progress logging
         self.logger.info("Creating training dataset...")
         train_dataset = WikiTextDataset(
             "train",
-            tokenizer,
+            self.tokenizer,
             self.config.sequence_length,
             self.config.max_dataset_tokens,
         )
@@ -147,7 +157,7 @@ class Trainer:
         self.logger.info("Creating validation dataset...")
         val_dataset = WikiTextDataset(
             "validation",
-            tokenizer,
+            self.tokenizer,
             self.config.sequence_length,
             self.config.max_dataset_tokens,
         )
@@ -182,7 +192,18 @@ class Trainer:
         self, logits: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
         """Compute cross-entropy loss"""
-        return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+
+        pad_mask = targets != self.tokenizer.pad_token_id
+
+        return (
+            F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                targets.view(-1),
+                reduction="none",
+            )
+            .masked_select(pad_mask.view(-1))
+            .mean()
+        )
 
     def _compute_perplexity(self, loss: torch.Tensor) -> torch.Tensor:
         """Compute perplexity from loss"""
