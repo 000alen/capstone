@@ -51,3 +51,8 @@ class TrainingConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     num_workers: int = 4
     pin_memory: bool = True
+
+    # Embedding options
+    freeze_embeddings: bool = False  # Freeze the token embedding matrix during training
+    load_pretrained_embeddings: bool = False  # Initialize embeddings from a pretrained model
+    pretrained_model_name: str = "gpt2"  # Hugging Face model to load embeddings from

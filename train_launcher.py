@@ -75,6 +75,9 @@ def create_training_config(config_dict: dict) -> TrainingConfig:
         "model_heads": "heads",
         "model_rank": "rank",
         "model_sigma": "sigma",
+        "model_freeze_embeddings": "freeze_embeddings",
+        "model_load_pretrained_embeddings": "load_pretrained_embeddings",
+        "model_pretrained_model_name": "pretrained_model_name",
         # Training parameters
         "training_batch_size": "batch_size",
         "training_sequence_length": "sequence_length",

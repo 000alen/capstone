@@ -40,17 +40,43 @@ class Trainer:
         self.logger.info("Setting up checkpoint directory...")
         Path(config.checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
-        # Initialize model
+        # ------------------------------------------------------------
+        # Load data (and tokenizer) FIRST so vocab_size is correct
+        # ------------------------------------------------------------
+        self.logger.info("Loading datasets and tokenizer...")
+        self.train_loader, self.val_loader = self._load_data()
+
+        # Calculate total steps for time estimation (needs train_loader)
+        self.total_steps = len(self.train_loader) * self.config.max_epochs
+
+        # ------------------------------------------------------------
+        # Initialize model (after vocab_size potentially updated)
+        # ------------------------------------------------------------
         self.logger.info("Initializing model...")
         self.model = SecureTransformer(config).to(self.device)
+
+        # Optionally load pretrained embeddings
+        if self.config.load_pretrained_embeddings:
+            self._load_pretrained_embeddings()
+
+        # Optionally freeze embeddings
+        if self.config.freeze_embeddings:
+            self.logger.info("Freezing token embedding matrix (no gradient updates)...")
+            self.model.client_front.embed.requires_grad_(False)
+
         self.logger.info(
             f"Model initialized with {sum(p.numel() for p in self.model.parameters()):,} parameters"
         )
 
-        # Initialize optimizer
+        # ------------------------------------------------------------
+        # Initialize optimizer (only trainable params)
+        # ------------------------------------------------------------
         self.logger.info("Setting up optimizer...")
+
+        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+
         self.optimizer = AdamW(
-            self.model.parameters(),
+            trainable_params,
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
             betas=(config.beta1, config.beta2),
@@ -65,12 +91,6 @@ class Trainer:
         self.training_start_time = None
         self.step_times = []  # Track recent step times for moving average
         self.max_step_times = 100  # Keep last 100 step times for averaging
-
-        # Load data
-        self.train_loader, self.val_loader = self._load_data()
-
-        # Calculate total steps for time estimation
-        self.total_steps = len(self.train_loader) * self.config.max_epochs
 
         # Initialize scheduler
         self.logger.info("Setting up learning rate scheduler...")
@@ -120,6 +140,44 @@ class Trainer:
             schedulers=[warmup_scheduler, cosine_scheduler],
             milestones=[self.config.warmup_steps],
         )
+
+    # ------------------------------------------------------------------
+    # New helper: load pretrained embeddings into ClientFront
+    # ------------------------------------------------------------------
+    def _load_pretrained_embeddings(self):
+        """Load token embeddings from a pretrained HuggingFace model
+
+        Requires that the tokenizer has already set self.config.vocab_size.
+        Checks dimensional consistency with (k_vec * d_signal).
+        """
+        from transformers import GPT2PreTrainedModel
+
+        model_name = self.config.pretrained_model_name
+        self.logger.info(f"Loading pretrained embeddings from '{model_name}' ...")
+
+        hf_model = GPT2PreTrainedModel.from_pretrained(model_name)
+        emb_weight = hf_model.get_input_embeddings().weight.detach()
+
+        vocab_size, embed_dim = emb_weight.shape
+        if vocab_size != self.config.vocab_size:
+            raise ValueError(
+                f"Vocab size mismatch: tokenizer={self.config.vocab_size}, model={vocab_size}"
+            )
+
+        expected_dim = self.config.k_vec * self.config.d_signal
+        if embed_dim != expected_dim:
+            raise ValueError(
+                f"Embedding dim mismatch: expected {expected_dim} (k_vec*d_signal), got {embed_dim}."
+            )
+
+        # Reshape and copy into ClientFront embedding parameter
+        reshaped = emb_weight.view(vocab_size, self.config.k_vec, self.config.d_signal)
+        target_param = self.model.client_front.embed
+        self.model.client_front.embed.data.copy_(
+            reshaped.to(device=target_param.device, dtype=target_param.dtype)
+        )
+
+        self.logger.info("Pretrained embeddings loaded successfully.")
 
     def _load_data(self) -> Tuple[DataLoader, DataLoader]:
         """Load and prepare WikiText-103 dataset"""

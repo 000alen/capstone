@@ -1,0 +1,43 @@
+# Configuration: small model with frozen GPT-2 embeddings
+
+model:
+  d_signal: 768          # 1 × 768 = 768 matches GPT-2
+  m_noise: 16            # same noise dimension
+  k_vec: 1               # single vector
+  layers: 12             # keep depth
+  heads: 1               # must divide k_vec
+  rank: 32
+  sigma: 1.0
+
+  load_pretrained_embeddings: true
+  freeze_embeddings: true
+  pretrained_model_name: "gpt2"
+
+training:
+  batch_size: 32
+  sequence_length: 256
+  learning_rate: 0.0005
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip_norm: 1.0
+  max_epochs: 20
+  warmup_steps: 500
+  eval_interval: 1000
+  save_interval: 7000
+
+data:
+  dataset_name: "wikitext"
+  dataset_config: "wikitext-103-raw-v1"
+  tokenizer_name: "gpt2"
+  num_workers: 2
+  pin_memory: true
+
+experiment:
+  project_name: "secure-transformer-gpt2"
+  experiment_name: null
+  checkpoint_dir: "./checkpoints_gpt2"
+  log_level: "INFO"
+
+hardware:
+  device: "auto" 
