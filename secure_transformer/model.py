@@ -168,6 +168,11 @@ class ETokenAttention(nn.Module):
         v = self.vs.view(1, 1, h, 1, 1) * xh
         scores = torch.einsum("bthdn,bshdn->bhts", q, k_) / math.sqrt(n)
         scores = scores + self._relative_bias(T, x.device).permute(2, 0, 1)
+
+        mask = torch.full((T, T), float("-inf"), device=x.device)
+        mask = torch.triu(mask, diagonal=1)  # upper triangle (s > t)
+        scores = scores + mask
+
         attn = F.softmax(scores, dim=-1)
         out = torch.einsum("bhts,bshdn->bthdn", attn, v)
         return out.reshape(B, T, k, n)
