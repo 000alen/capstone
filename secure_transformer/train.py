@@ -150,12 +150,12 @@ class Trainer:
         Requires that the tokenizer has already set self.config.vocab_size.
         Checks dimensional consistency with (k_vec * d_signal).
         """
-        from transformers import AutoModel
+        from transformers import GPT2PreTrainedModel
 
         model_name = self.config.pretrained_model_name
         self.logger.info(f"Loading pretrained embeddings from '{model_name}' ...")
 
-        hf_model = AutoModel.from_pretrained(model_name)
+        hf_model = GPT2PreTrainedModel.from_pretrained(model_name)
         emb_weight = hf_model.get_input_embeddings().weight.detach()
 
         vocab_size, embed_dim = emb_weight.shape
