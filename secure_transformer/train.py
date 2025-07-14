@@ -182,7 +182,18 @@ class Trainer:
         self, logits: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
         """Compute cross-entropy loss"""
-        return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+
+        pad_mask = targets != self.tokenizer.pad_token_id
+
+        return (
+            F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                targets.view(-1),
+                reduction="none",
+            )
+            .masked_select(pad_mask.view(-1))
+            .mean()
+        )
 
     def _compute_perplexity(self, loss: torch.Tensor) -> torch.Tensor:
         """Compute perplexity from loss"""
