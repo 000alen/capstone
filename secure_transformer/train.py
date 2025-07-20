@@ -156,7 +156,13 @@ class Trainer:
         self.logger.info(f"Loading pretrained embeddings from '{model_name}' ...")
 
         hf_model = AutoModel.from_pretrained(model_name)
-        emb_weight = hf_model.get_input_embeddings().weight.detach()
+        input_embeddings = hf_model.get_input_embeddings()
+        if input_embeddings is None:
+            raise ValueError(
+                f"The model '{model_name}' does not have input embeddings. "
+                "Please ensure the pretrained model supports input embeddings."
+            )
+        emb_weight = input_embeddings.weight.detach()
 
         vocab_size, embed_dim = emb_weight.shape
         if vocab_size != self.config.vocab_size:
