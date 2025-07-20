@@ -172,9 +172,8 @@ class Trainer:
 
         # Reshape and copy into ClientFront embedding parameter
         reshaped = emb_weight.view(vocab_size, self.config.k_vec, self.config.d_signal)
-        target_param = self.model.client_front.embed
         self.model.client_front.embed.data.copy_(
-            reshaped.to(device=target_param.device, dtype=target_param.dtype)
+            reshaped.to(device=self.model.client_front.embed.device, dtype=self.model.client_front.embed.dtype)
         )
 
         self.logger.info("Pretrained embeddings loaded successfully.")
